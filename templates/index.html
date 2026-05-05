@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Mapa Seguro</title>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+
+    <style>
+        body { font-family: Arial; }
+        #map { height: 500px; }
+
+        #panel {
+            padding: 10px;
+            background: #f2f2f2;
+        }
+
+        button {
+            margin: 5px;
+            padding: 5px 10px;
+        }
+
+        #leyenda {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: white;
+            padding: 12px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.4);
+            font-size: 13px;
+            z-index: 9999;
+        }
+
+        .item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+
+        .color {
+            width: 15px;
+            height: 15px;
+            margin-right: 5px;
+        }
+    </style>
+</head>
+<body>
+
+<h2>Mapa de Zonas Seguras</h2>
+
+<div id="panel">
+    <label>Tipo de reporte:</label>
+    <select id="tipo">
+        <option value="robo">🚨 Robo</option>
+        <option value="robo_activo">⚠️ Robo en progreso</option>
+        <option value="poca_luz">🌑 Poca iluminación</option>
+        <option value="huecos">🕳️ Huecos</option>
+        <option value="lote_baldio">🏚️ Lote baldío</option>
+        <option value="sospechoso">👀 Movimiento sospechoso</option>
+        <option value="zona_roja">🔴 Zona peligrosa</option>
+        <option value="basura">🗑️ Basura</option>
+    </select>
+
+    <button onclick="obtenerUbicacion()">📍 Mi ubicación</button>
+    <button onclick="cargarReportes()">🚨 Ver reportes</button>
+    <button onclick="rutaSegura()">🛣️ Ruta segura</button>
+    <button onclick="activarHeatmap()">🔥 Mapa de calor</button>
+</div>
+
+<div id="map"></div>
+
+<div id="leyenda">
+    <b>Guía de colores</b>
+    <div class="item"><div class="color" style="background:red"></div> Robo</div>
+    <div class="item"><div class="color" style="background:darkred"></div> Robo activo</div>
+    <div class="item"><div class="color" style="background:gray"></div> Poca luz</div>
+    <div class="item"><div class="color" style="background:orange"></div> Huecos</div>
+    <div class="item"><div class="color" style="background:brown"></div> Lote baldío</div>
+    <div class="item"><div class="color" style="background:purple"></div> Sospechoso</div>
+    <div class="item"><div class="color" style="background:black"></div> Zona peligrosa</div>
+    <div class="item"><div class="color" style="background:green"></div> Basura</div>
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
+
+<script>
+var map = L.map('map').setView([4.7110, -74.0721], 13);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+var marcadorUsuario = null;
+var marcadores = [];
+var rutaActual = null;
+var heatLayer = null;
+
+function getColor(tipo) {
+    switch(tipo) {
+        case "robo": return "red";
+        case "robo_activo": return "darkred";
+        case "poca_luz": return "gray";
+        case "huecos": return "orange";
+        case "lote_baldio": return "brown";
+        case "sospechoso": return "purple";
+        case "zona_roja": return "black";
+        case "basura": return "green";
+        default: return "blue";
+    }
+}
+
+function obtenerUbicacion() {
+    navigator.geolocation.getCurrentPosition(function(pos) {
+
+        var lat = pos.coords.latitude;
+        var lng = pos.coords.longitude;
+
+        map.setView([lat, lng], 15);
+
+        if (marcadorUsuario) map.removeLayer(marcadorUsuario);
+
+        marcadorUsuario = L.marker([lat, lng]).addTo(map)
+            .bindPopup("📍 Estás aquí")
+            .openPopup();
+
+        marcadorUsuario.on('click', function() {
+            var tipo = document.getElementById("tipo").value;
+
+            if (!confirm("¿Reportar aquí?")) return;
+
+            fetch('/guardar', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({lat, lng, tipo})
+            })
+            .then(r => r.json())
+            .then(d => {
+                alert(d.mensaje);
+                cargarReportes();
+            });
+        });
+    });
+}
+
+map.on('click', function(e) {
+
+    var tipo = document.getElementById("tipo").value;
+
+    if (!confirm("¿Confirmar reporte?")) return;
+
+    fetch('/guardar', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            lat: e.latlng.lat,
+            lng: e.latlng.lng,
+            tipo: tipo
+        })
+    })
+    .then(r => r.json())
+    .then(d => {
+        alert(d.mensaje);
+        cargarReportes();
+    });
+});
+
+function cargarReportes() {
+
+    marcadores.forEach(m => map.removeLayer(m));
+    marcadores = [];
+
+    fetch('/reportes')
+    .then(r => r.json())
+    .then(data => {
+
+        data.forEach(r => {
+
+            var marcador = L.circleMarker([r.lat, r.lng], {
+                color: getColor(r.tipo),
+                radius: 8
+            }).addTo(map);
+
+            marcadores.push(marcador);
+        });
+
+    });
+}
+
+function rutaSegura() {
+
+    if (!marcadorUsuario) {
+        alert("Primero usa tu ubicación");
+        return;
+    }
+
+    alert("Selecciona destino");
+
+    map.once('click', function(e) {
+
+        var lat1 = marcadorUsuario.getLatLng().lat;
+        var lng1 = marcadorUsuario.getLatLng().lng;
+
+        if (rutaActual) map.removeLayer(rutaActual);
+
+        rutaActual = L.polyline([
+            [lat1, lng1],
+            [e.latlng.lat, e.latlng.lng]
+        ]).addTo(map);
+
+    });
+}
+
+function activarHeatmap() {
+
+    if (heatLayer) {
+        map.removeLayer(heatLayer);
+    }
+
+    fetch('/reportes')
+    .then(r => r.json())
+    .then(data => {
+
+        var puntos = data.map(r => [r.lat, r.lng, 0.5]);
+
+        heatLayer = L.heatLayer(puntos, {
+            radius: 25,
+            blur: 15
+        }).addTo(map);
+
+    });
+}
+
+/* 🔥 CARGA INICIAL */
+cargarReportes();
+
+/* 🔄 AUTO-REFRESH CADA 5 SEGUNDOS */
+setInterval(() => {
+    cargarReportes();
+}, 5000);
+
+</script>
+
+</body>
+</html>
